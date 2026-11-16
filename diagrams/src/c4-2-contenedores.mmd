@@ -1,0 +1,91 @@
+flowchart LR
+  classDef persona fill:#08427b,stroke:#052e56,color:#fff
+  classDef cont fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef dato fill:#2f8f83,stroke:#1d5f57,color:#fff
+  classDef bus fill:#c26a00,stroke:#8a4b00,color:#fff
+  classDef externo fill:#999999,stroke:#6b6b6b,color:#fff
+
+  cliente(["<b>Cliente</b>"]):::persona
+  prospecto(["<b>Prospecto</b>"]):::persona
+  analista(["<b>Analista de Operaciones<br/>y Cumplimiento</b>"]):::persona
+
+  subgraph canales["Canales"]
+    spa["<b>Aplicación Web SPA</b><br/>[React, TypeScript]"]:::cont
+    movil["<b>App Móvil</b><br/>[React Native]<br/>Biometría local, SDK KYC"]:::cont
+    back["<b>Consola de Backoffice</b><br/>[React, red interna]"]:::cont
+  end
+
+  subgraph acceso["Acceso y seguridad"]
+    gw["<b>API Gateway</b><br/>[Kong Gateway]<br/>JWT, límites de uso,<br/>enrutamiento"]:::cont
+    idp["<b>Servidor de Identidad</b><br/>[Keycloak + Aurora]<br/>OAuth 2.0 / OIDC, FIDO2, MFA"]:::cont
+    bff["<b>BFF y Orquestador</b><br/>[Java 21, Spring Boot]<br/>Composición de APIs,<br/>sesión web"]:::cont
+  end
+
+  subgraph dominio["Servicios de dominio  [Java 21, Spring Boot sobre EKS]"]
+    scli["<b>Servicio de Clientes</b><br/>Datos básicos y extendidos"]:::cont
+    smov["<b>Servicio de Movimientos</b><br/>Consulta de movimientos"]:::cont
+    str["<b>Servicio de Transferencias</b><br/>Propias, internas, interbancarias"]:::cont
+    sriesgo["<b>Servicio de Riesgo<br/>y Antifraude</b>"]:::cont
+    sonb["<b>Servicio de Onboarding</b><br/>Orquestación KYC"]:::cont
+    snot["<b>Servicio de Notificaciones</b>"]:::cont
+    saud["<b>Servicio de Auditoría</b>"]:::cont
+    warm["<b>Precarga de Caché</b><br/>[Worker]"]:::cont
+  end
+
+  subgraph datos["Datos y mensajería  [AWS]"]
+    redis[("<b>Caché</b><br/>[ElastiCache Redis]")]:::dato
+    dbmov[("<b>Lectura de Movimientos</b><br/>[DynamoDB]")]:::dato
+    dbtr[("<b>BD Transferencias</b><br/>[Aurora PostgreSQL]")]:::dato
+    dbon[("<b>BD Onboarding</b><br/>[Aurora PostgreSQL + S3]")]:::dato
+    dbaud[("<b>BD Auditoría</b><br/>[Aurora PostgreSQL + S3 Object Lock]")]:::dato
+    kafka{{"<b>Bus de eventos</b><br/>[Apache Kafka, Amazon MSK]"}}:::bus
+  end
+
+  subgraph dc["Datacenter del Banco"]
+    cdc["<b>Conector CDC</b><br/>[Debezium, Kafka Connect]"]:::cont
+    integ["<b>Capa de Integración Bancaria</b><br/>[Java, REST/gRPC]<br/>Anti-corruption layer"]:::cont
+    core["<b>Core Bancario</b>"]:::externo
+    ext["<b>Sistema de Datos Extendidos</b>"]:::externo
+    bd[("<b>Base de Datos Principal</b>")]:::externo
+  end
+
+  subgraph ident["Verificación de identidad"]
+    kyc["<b>Proveedor KYC y Biometría</b>"]:::externo
+    rc["<b>Registro Civil</b>"]:::externo
+    aml["<b>Listas AML/PEP</b>"]:::externo
+  end
+  spi["<b>SPI - BCE</b><br/>Pagos interbancarios"]:::externo
+  pnot["<b>Push, SMS, Email</b><br/>Proveedores de notificación"]:::externo
+
+  cliente --> spa & movil
+  prospecto --> movil
+  analista --> back
+
+  canales -- "HTTPS + JWT" --> gw
+  canales -. "Auth Code + PKCE" .-> idp
+  gw -. "Valida tokens" .-> idp
+  gw --> bff
+  gw -- "Rutas directas" --> sonb
+  bff --> scli & smov & str
+
+  scli -- "Cache-aside" --> redis
+  warm -- "Precarga" --> redis
+  smov --> dbmov
+  str --> dbtr
+  str -- "Evalúa operación" --> sriesgo
+  sonb --> dbon
+  saud --> dbaud
+  sonb --> ident
+  snot --> pnot
+
+  scli -- "Core y datos extendidos" --> integ
+  smov -- "Saldos" --> integ
+  str -- "Débito, crédito, SPI" --> integ
+  sonb -- "Alta de cliente" --> integ
+
+  integ --> core & ext & spi
+  core --- bd
+  ext --- bd
+  cdc -- "Lee cambios" --> bd
+  cdc -- "Eventos de movimientos<br/>y clientes" --> kafka
+  dominio -. "Publican y consumen<br/>eventos" .-> kafka

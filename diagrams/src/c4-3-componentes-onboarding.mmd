@@ -1,0 +1,49 @@
+flowchart LR
+  classDef comp fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef cont fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef dato fill:#2f8f83,stroke:#1d5f57,color:#fff
+  classDef bus fill:#c26a00,stroke:#8a4b00,color:#fff
+  classDef externo fill:#999999,stroke:#6b6b6b,color:#fff
+
+  movil["<b>App Móvil</b><br/>[SDK KYC embebido]"]:::cont
+  kyc["<b>Proveedor KYC y Biometría</b>"]:::externo
+  rc["<b>Registro Civil</b>"]:::externo
+  aml["<b>Listas AML/PEP</b>"]:::externo
+  integ["<b>Capa de Integración Bancaria</b><br/>[Alta de cliente y cuenta]"]:::cont
+  idp["<b>Servidor de Identidad</b><br/>[Keycloak]"]:::cont
+  db[("<b>BD Onboarding</b><br/>[Aurora PostgreSQL]")]:::dato
+  s3[("<b>Evidencias</b><br/>[S3 cifrado con KMS]")]:::dato
+  kafka{{"<b>Bus de eventos</b>"}}:::bus
+  back["<b>Consola de Backoffice</b>"]:::cont
+
+  subgraph so["Servicio de Onboarding  [Spring Boot]"]
+    api["<b>API de solicitud</b><br/>Alta de prospecto, sesión de verificación,<br/>consulta de estado"]:::comp
+    cons["<b>Registro de consentimiento</b><br/>Términos y tratamiento de datos<br/>personales con versión y sello de tiempo"]:::comp
+    ver["<b>Verificador de contacto</b><br/>OTP a teléfono y correo"]:::comp
+    orq["<b>Orquestador del caso</b><br/>[Saga + máquina de estados]<br/>Pasos con compensación"]:::comp
+    kycport["<b>Puerto KYC</b><br/>[Adapter + Strategy]<br/>Proveedor intercambiable"]:::comp
+    wh["<b>Receptor de resultados</b><br/>Webhook firmado y consulta server-to-server"]:::comp
+    reglas["<b>Motor de decisión</b><br/>Aprobar, rechazar o revisión manual<br/>según umbrales configurables"]:::comp
+    rcad["<b>Adaptador Registro Civil</b>"]:::comp
+    amlad["<b>Adaptador de screening AML/PEP</b>"]:::comp
+    alta["<b>Aprovisionador</b><br/>Crea cliente en Core, usuario en IdP<br/>y registra dispositivo"]:::comp
+    cola["<b>Cola de revisión manual</b>"]:::comp
+    ev["<b>Gestor de evidencias</b><br/>Cifrado, retención y borrado<br/>según política"]:::comp
+  end
+
+  movil --> api
+  movil -. "Captura documento y selfie" .-> kyc
+  api --> cons & ver
+  api --> orq
+  orq --> kycport --> kyc
+  kyc -- "Resultado" --> wh --> orq
+  orq --> rcad --> rc
+  orq --> amlad --> aml
+  orq --> reglas
+  reglas -- "Aprobado" --> alta
+  reglas -- "Dudoso" --> cola --> back
+  alta --> integ
+  alta --> idp
+  orq --> db
+  orq --> ev --> s3
+  orq -. "onboarding.completado" .-> kafka

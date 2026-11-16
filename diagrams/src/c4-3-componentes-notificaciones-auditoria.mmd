@@ -1,0 +1,59 @@
+flowchart LR
+  classDef persona fill:#08427b,stroke:#052e56,color:#fff
+  classDef comp fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef cont fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef dato fill:#2f8f83,stroke:#1d5f57,color:#fff
+  classDef bus fill:#c26a00,stroke:#8a4b00,color:#fff
+  classDef externo fill:#999999,stroke:#6b6b6b,color:#fff
+
+  kafka{{"<b>Bus de eventos</b><br/>movimiento.registrado<br/>audit.events"}}:::bus
+  prefs[("<b>BD Preferencias y entregas</b><br/>[Aurora PostgreSQL]")]:::dato
+  push["<b>Push</b><br/>[APNs / FCM]"]:::externo
+  sms["<b>SMS</b><br/>[Agregador local + respaldo]"]:::externo
+  mail["<b>Email</b><br/>[Amazon SES]"]:::externo
+  inapp["<b>Bandeja in-app</b><br/>[WebSocket / SSE]"]:::cont
+  dbaud[("<b>BD Auditoría</b><br/>[Aurora PostgreSQL]")]:::dato
+  worm[("<b>Archivo inmutable</b><br/>[S3 Object Lock]")]:::dato
+  analista(["<b>Analista de Cumplimiento</b>"]):::persona
+
+  subgraph sn["Servicio de Notificaciones  [Spring Boot]"]
+    cons["<b>Consumidor de movimientos</b><br/>Idempotente por movimiento y canal"]:::comp
+    pref["<b>Resolutor de preferencias</b><br/>Canales mínimos obligatorios<br/>más los elegidos por el cliente"]:::comp
+    tpl["<b>Generador de mensajes</b><br/>Plantillas por tipo y canal,<br/>datos enmascarados"]:::comp
+    cadena["<b>Cadena de canales</b><br/>[Chain of Responsibility]<br/>Push, luego SMS si no hay acuse,<br/>email como constancia"]:::comp
+    cpush["<b>Canal Push</b><br/>[Strategy]"]:::comp
+    csms["<b>Canal SMS</b><br/>[Strategy]"]:::comp
+    cmail["<b>Canal Email</b><br/>[Strategy]"]:::comp
+    cinapp["<b>Canal In-app</b><br/>[Strategy]"]:::comp
+    dlq["<b>Reintentos y DLQ</b><br/>[SQS]<br/>Backoff, alerta si agota intentos"]:::comp
+    reg["<b>Registro de entregas</b><br/>Enviada, entregada, fallida"]:::comp
+    cons --> pref --> tpl --> cadena
+    cadena --> cpush & csms & cmail & cinapp
+    cadena --> dlq
+    cadena --> reg
+  end
+
+  subgraph sa["Servicio de Auditoría  [Spring Boot]"]
+    ing["<b>Consumidor de auditoría</b><br/>Valida esquema y firma de origen"]:::comp
+    enr["<b>Enriquecedor</b><br/>Actor, dispositivo, IP, geolocalización,<br/>trace id"]:::comp
+    cad["<b>Encadenador de hash</b><br/>Hash del registro anterior<br/>(detección de manipulación)"]:::comp
+    wr["<b>Escritor</b><br/>Solo inserción, particiones mensuales"]:::comp
+    arch["<b>Archivador</b><br/>Exporta a Parquet con Object Lock"]:::comp
+    q["<b>API de consulta</b><br/>RBAC, enmascarado, cada consulta<br/>queda auditada"]:::comp
+    ing --> enr --> cad --> wr
+    wr --> arch
+  end
+
+  kafka --> cons
+  prefs <--> pref
+  reg --> prefs
+  cpush --> push
+  csms --> sms
+  cmail --> mail
+  cinapp --> inapp
+  kafka --> ing
+  wr --> dbaud
+  arch --> worm
+  analista --> q --> dbaud
+  q -. "Históricos" .-> worm
+  reg -. "Entregas auditables" .-> kafka

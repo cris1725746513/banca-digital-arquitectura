@@ -1,0 +1,48 @@
+flowchart LR
+  classDef comp fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef cont fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef dato fill:#2f8f83,stroke:#1d5f57,color:#fff
+  classDef bus fill:#c26a00,stroke:#8a4b00,color:#fff
+  classDef externo fill:#999999,stroke:#6b6b6b,color:#fff
+
+  bff["<b>BFF y Orquestador</b>"]:::cont
+  riesgo["<b>Servicio de Riesgo<br/>y Antifraude</b>"]:::cont
+  db[("<b>BD Transferencias</b><br/>[Aurora PostgreSQL]")]:::dato
+  kafka{{"<b>Bus de eventos</b>"}}:::bus
+  integ["<b>Capa de Integración Bancaria</b>"]:::cont
+  core["<b>Core Bancario</b>"]:::externo
+  spi["<b>SPI - BCE</b>"]:::externo
+  swift["<b>Red internacional</b><br/>[Futuro: SWIFT]"]:::externo
+
+  subgraph st["Servicio de Transferencias  [Spring Boot]"]
+    api["<b>API REST</b><br/>POST /transferencias, GET estado.<br/>Exige Idempotency-Key y acr de step-up"]:::comp
+    idem["<b>Control de idempotencia</b><br/>Deduplicación por clave y huella<br/>del cuerpo"]:::comp
+    val["<b>Validador de solicitud</b><br/>Cuentas, monto, beneficiario,<br/>horario y límites"]:::comp
+    fac["<b>Fábrica de estrategias</b><br/>Selecciona el procesador según tipo:<br/>PROPIA, TERCERO_INTERNO, INTERBANCARIA"]:::comp
+    sp["<b>Procesador propias y<br/>terceros del banco</b><br/>[Strategy]<br/>Una operación atómica en el Core"]:::comp
+    si["<b>Procesador interbancario</b><br/>[Strategy + Saga orquestada]<br/>Reserva, envío, confirmación,<br/>compensación"]:::comp
+    sx["<b>Procesador internacional</b><br/>[Strategy, fase futura]"]:::comp
+    fsm["<b>Máquina de estados</b><br/>RECIBIDA, VALIDADA, RESERVADA,<br/>ENVIADA, COMPLETADA, FALLIDA,<br/>REVERTIDA, EN_CONCILIACION"]:::comp
+    ac1["<b>Adaptador Core</b><br/>[Adapter + Circuit Breaker]<br/>reservar, confirmar, liberar"]:::comp
+    ac2["<b>Adaptador SPI</b><br/>[Adapter + Circuit Breaker]<br/>envío, consulta de estado"]:::comp
+    rep["<b>Repositorio y Outbox</b><br/>Estado y eventos en la misma<br/>transacción local"]:::comp
+    pub["<b>Publicador de eventos</b><br/>Outbox hacia Kafka"]:::comp
+    rec["<b>Conciliador</b><br/>Reintenta estados inciertos y<br/>concilia contra archivo del SPI"]:::comp
+  end
+
+  bff --> api --> idem --> val --> fac
+  val -- "Evalúa" --> riesgo
+  fac --> sp & si & sx
+  sp --> ac1
+  si --> ac1
+  si --> ac2
+  sp & si --> fsm
+  fsm --> rep --> db
+  rep --> pub --> kafka
+  ac1 --> integ --> core
+  ac2 --> integ
+  integ --> spi
+  sx -.-> swift
+  rec --> ac2
+  rec --> fsm
+  idem --> db

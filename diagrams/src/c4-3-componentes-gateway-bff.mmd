@@ -1,0 +1,39 @@
+flowchart LR
+  classDef comp fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef cont fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef dato fill:#2f8f83,stroke:#1d5f57,color:#fff
+  classDef bus fill:#c26a00,stroke:#8a4b00,color:#fff
+
+  canal["<b>Web SPA / App Móvil /<br/>Backoffice</b><br/>[Canales]"]:::cont
+  idp["<b>Servidor de Identidad</b><br/>[Keycloak]"]:::cont
+  svc["<b>Servicios de dominio</b><br/>Clientes, Movimientos,<br/>Transferencias, Onboarding"]:::cont
+  kafka{{"<b>Bus de eventos</b>"}}:::bus
+  redis[("<b>Caché</b><br/>[Redis]")]:::dato
+
+  subgraph gw["API Gateway  [Kong Gateway sobre EKS]"]
+    waf["<b>Protección perimetral</b><br/>Reglas WAF, mTLS con balanceador,<br/>límite de tamaño y esquema"]:::comp
+    authn["<b>Validador de tokens</b><br/>JWT/JWKS, comprobación DPoP,<br/>scopes y acr requerido"]:::comp
+    rl["<b>Control de tráfico</b><br/>Rate limit por cliente y dispositivo,<br/>cuotas, protección ante picos"]:::comp
+    router["<b>Enrutador y versionado</b><br/>Rutas /v1, canary,<br/>transformación de cabeceras"]:::comp
+    corr["<b>Correlación y auditoría de acceso</b><br/>traceparent, request-id,<br/>evento de acceso"]:::comp
+    waf --> authn --> rl --> router
+    router --> corr
+  end
+
+  subgraph bff["BFF y Orquestador  [Spring Boot]"]
+    sesion["<b>Gestor de sesión web</b><br/>Authorization Code + PKCE confidencial,<br/>cookie HttpOnly, CSRF"]:::comp
+    api["<b>Controladores por canal</b><br/>Resumen de cuenta, detalle,<br/>iniciar transferencia"]:::comp
+    comp1["<b>Compositor de respuestas</b><br/>Llamadas paralelas, timeouts,<br/>respuesta parcial"]:::comp
+    cb["<b>Resiliencia</b><br/>Circuit breaker, bulkhead,<br/>retry con backoff [Resilience4j]"]:::comp
+    cl["<b>Clientes de servicio</b><br/>Clientes OpenAPI generados,<br/>propagación de identidad"]:::comp
+    sesion --> api --> comp1 --> cb --> cl
+  end
+
+  canal -- "HTTPS" --> waf
+  authn -. "JWKS (cache local)" .-> idp
+  router --> api
+  router -- "Rutas sin composición" --> svc
+  sesion -- "Intercambio de código<br/>y refresh" --> idp
+  sesion -. "Sesión opcional" .-> redis
+  cl --> svc
+  corr -. "Eventos de acceso" .-> kafka

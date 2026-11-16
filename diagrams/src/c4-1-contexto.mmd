@@ -1,0 +1,34 @@
+flowchart LR
+  classDef persona fill:#08427b,stroke:#052e56,color:#fff
+  classDef sistema fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef externo fill:#999999,stroke:#6b6b6b,color:#fff
+
+  cliente(["<b>Cliente</b><br/>[Persona]<br/>Consulta movimientos,<br/>transfiere dinero"]):::persona
+  prospecto(["<b>Prospecto</b><br/>[Persona]<br/>Se registra como<br/>nuevo cliente"]):::persona
+  analista(["<b>Analista de Operaciones<br/>y Cumplimiento</b><br/>[Persona]<br/>Revisa casos y auditoría"]):::persona
+
+  plataforma["<b>Plataforma de Banca Digital</b><br/>[Sistema de software]<br/>Web y móvil: consultas, transferencias,<br/>onboarding, notificaciones y auditoría"]:::sistema
+
+  core["<b>Core Bancario</b><br/>[Sistema existente]<br/>Datos básicos, productos,<br/>cuentas y movimientos"]:::externo
+  ext["<b>Sistema de Datos Extendidos</b><br/>[Sistema existente]<br/>Información complementaria<br/>del cliente"]:::externo
+  bd[("<b>Base de Datos Principal</b><br/>[Base de datos existente]<br/>Compartida por Core<br/>y datos extendidos")]:::externo
+  spi["<b>Sistema de Pagos Interbancarios</b><br/>[Sistema externo - BCE]<br/>Transferencias entre bancos"]:::externo
+  kyc["<b>Proveedor KYC y Biometría</b><br/>[SaaS externo]<br/>Documento, prueba de vida<br/>y comparación facial"]:::externo
+  rc["<b>Registro Civil</b><br/>[Sistema externo]<br/>Validación de identidad"]:::externo
+  aml["<b>Listas de Control AML/PEP</b><br/>[Servicio externo]<br/>Screening de sanciones"]:::externo
+  notif["<b>Proveedores de Notificación</b><br/>[Servicios externos]<br/>Push (APNs/FCM), SMS, Email.<br/>Entregan el aviso al cliente"]:::externo
+
+  cliente -- "Usa web y app móvil<br/>[HTTPS]" --> plataforma
+  prospecto -- "Se registra desde la app<br/>con reconocimiento facial" --> plataforma
+  analista -- "Gestiona casos, consulta<br/>auditoría [HTTPS, VPN]" --> plataforma
+
+  plataforma -- "Consulta productos y movimientos,<br/>ejecuta débitos y créditos<br/>[API privada]" --> core
+  plataforma -- "Consulta datos extendidos<br/>[API privada]" --> ext
+  plataforma -. "Réplica de cambios y<br/>movimientos (CDC)" .-> bd
+  core --- bd
+  ext --- bd
+  plataforma -- "Envía transferencias<br/>interbancarias" --> spi
+  plataforma -- "Verifica documento y rostro" --> kyc
+  plataforma -- "Valida cédula" --> rc
+  plataforma -- "Consulta listas de control" --> aml
+  plataforma -- "Envía notificaciones<br/>de cada movimiento" --> notif

@@ -1,0 +1,43 @@
+sequenceDiagram
+  autonumber
+  actor U as Cliente
+  participant A as App móvil
+  participant K as Servidor de Identidad (Keycloak)
+  participant G as API Gateway
+  participant S as Servicios de dominio
+  participant B as Bus de eventos
+
+  Note over U,K: Primer ingreso en un dispositivo
+  U->>A: Abre la app
+  A->>A: Genera par de claves del dispositivo (Secure Enclave / StrongBox)<br/>y code_verifier PKCE
+  A->>K: Navegador del sistema: /authorize (code_challenge, PAR, acr_values)
+  K->>U: Pantalla de login (usuario y contraseña)
+  U->>K: Credenciales
+  K->>K: Política de contraseñas, bloqueo por intentos, evaluación de riesgo
+  K-->>A: Redirección con authorization code
+  A->>K: /token (code + code_verifier + prueba DPoP)
+  K-->>A: Access token (5 min, ligado a DPoP) + refresh token rotativo
+  A->>K: Registro de dispositivo: clave pública + atestación (Play Integrity / App Attest)
+  K-->>A: Dispositivo vinculado
+  A->>U: Ofrece activar biometría
+  U->>A: Confirma con huella o rostro del dispositivo
+  A->>A: Guarda refresh token en Keystore/Keychain protegido por biometría
+
+  Note over U,K: Ingresos siguientes
+  U->>A: Huella o rostro (verificación local, el dato biométrico no sale del dispositivo)
+  A->>A: Libera la clave y firma la prueba DPoP
+  A->>K: /token (refresh token + DPoP)
+  K-->>A: Nuevo access token y refresh token rotado
+  K-)B: auth.login.exitoso
+
+  Note over U,S: Uso normal y operaciones sensibles
+  A->>G: GET /v1/resumen (Bearer + DPoP)
+  G->>G: Valida firma, expiración, scope, DPoP, rate limit
+  G->>S: Solicitud con identidad propagada
+  S-->>A: Respuesta
+  A->>G: POST /v1/transferencias
+  G-->>A: 401 insufficient_user_authentication (requiere acr=step-up)
+  A->>K: /authorize con acr_values=step-up
+  K->>U: Confirmación biométrica y firma del reto con la clave del dispositivo
+  K-->>A: Token con acr elevado (vigencia corta)
+  A->>G: POST /v1/transferencias (Idempotency-Key)

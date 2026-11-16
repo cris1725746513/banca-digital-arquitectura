@@ -1,0 +1,56 @@
+sequenceDiagram
+  autonumber
+  participant A as App / SPA
+  participant G as API Gateway
+  participant T as Servicio de Transferencias
+  participant R as Riesgo y Antifraude
+  participant I as Capa de Integración
+  participant C as Core Bancario
+  participant S as SPI - BCE
+  participant B as Bus de eventos
+  participant N as Notificaciones
+  participant U as Auditoría
+
+  A->>G: POST /v1/transferencias (token con step-up, Idempotency-Key)
+  G->>T: Solicitud validada
+  T->>T: Busca la clave de idempotencia (si existe, devuelve el resultado previo)
+  T->>R: Evaluar (monto, beneficiario, dispositivo, historial)
+  R-->>T: Permitir / Reforzar autenticación / Bloquear
+  T->>T: Estado RECIBIDA > VALIDADA (guarda estado y outbox en una transacción)
+  T-->>A: 202 Accepted + id de transferencia
+
+  alt Transferencia propia o a tercero del banco
+    T->>I: transferir(origen, destino, monto)
+    I->>C: Operación atómica
+    C-->>I: OK
+    I-->>T: OK
+    T->>T: Estado COMPLETADA
+  else Transferencia interbancaria
+    T->>I: reservarFondos(origen, monto)
+    I->>C: Reserva
+    C-->>T: Reservado
+    T->>T: Estado RESERVADA
+    T->>I: enviarSPI(instrucción)
+    I->>S: Instrucción de pago
+    alt Respuesta exitosa
+      S-->>I: Aceptada
+      I-->>T: OK
+      T->>I: confirmarDebito(reserva)
+      T->>T: Estado COMPLETADA
+    else Rechazo explícito
+      S-->>I: Rechazada
+      T->>I: liberarReserva
+      T->>T: Estado FALLIDA (compensación)
+    else Sin respuesta (timeout)
+      T->>T: Estado EN_CONCILIACION (no se asume fallo)
+      Note over T,S: El conciliador consulta el estado en el SPI<br/>y confirma o revierte la reserva
+    end
+  end
+
+  T-)B: transferencia.completada / fallida (outbox)
+  C-)B: movimiento.registrado (CDC)
+  B-)N: Evento de movimiento
+  N->>A: Push, luego SMS si no hay acuse, email como constancia
+  B-)U: Evento de auditoría
+  A->>G: GET /v1/transferencias/{id}
+  G-->>A: Estado final

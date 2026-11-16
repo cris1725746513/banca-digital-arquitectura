@@ -1,0 +1,50 @@
+sequenceDiagram
+  autonumber
+  actor P as Prospecto
+  participant A as App móvil (SDK KYC)
+  participant O as Servicio de Onboarding
+  participant K as Proveedor KYC
+  participant RC as Registro Civil
+  participant L as Listas AML/PEP
+  participant I as Capa de Integración
+  participant ID as Servidor de Identidad
+  participant N as Notificaciones
+  participant M as Revisión manual
+
+  P->>A: Inicia registro
+  A->>O: Crea solicitud (con token de dispositivo y atestación)
+  O-->>A: Términos y consentimiento de datos personales
+  P->>A: Acepta (versión y fecha quedan registradas)
+  A->>O: Teléfono y correo
+  O->>P: OTP por SMS y por email
+  P->>A: Ingresa los códigos
+  A->>O: Verificación de contacto
+
+  O->>K: Crea sesión de verificación
+  K-->>O: Token de sesión del SDK
+  O-->>A: Token de sesión
+  P->>A: Fotografía cédula (anverso y reverso)
+  P->>A: Selfie con prueba de vida
+  A->>K: Imágenes (directo al proveedor, sin pasar por el banco)
+  K-->>O: Webhook firmado: autenticidad del documento, vivacidad, similitud facial
+  O->>K: Consulta del resultado (server-to-server, no se confía solo en el webhook)
+
+  O->>RC: Valida cédula y datos del titular
+  RC-->>O: Datos oficiales
+  O->>L: Screening de sanciones y PEP
+  L-->>O: Resultado
+
+  O->>O: Motor de decisión con umbrales configurables
+  alt Aprobado
+    O->>I: Crea cliente y cuenta
+    I-->>O: Identificador de cliente
+    O->>ID: Crea usuario vinculado al cliente
+    O-->>A: Define contraseña y activa biometría del dispositivo
+    O-)N: Bienvenida
+  else Dudoso
+    O->>M: Caso a revisión manual con evidencias
+    M-->>O: Aprobado o rechazado
+  else Rechazado
+    O-->>A: Rechazo con mensaje genérico y vía de apelación
+  end
+  O->>O: Retención de evidencias según política, borrado al vencer

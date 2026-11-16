@@ -1,0 +1,40 @@
+flowchart LR
+  classDef comp fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef cont fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef dato fill:#2f8f83,stroke:#1d5f57,color:#fff
+  classDef bus fill:#c26a00,stroke:#8a4b00,color:#fff
+
+  bff["<b>BFF y Orquestador</b>"]:::cont
+  kafka{{"<b>Bus de eventos</b>"}}:::bus
+  redis[("<b>Caché</b><br/>[ElastiCache Redis, cluster mode]")]:::dato
+  integ["<b>Capa de Integración Bancaria</b><br/>Core + Datos Extendidos"]:::cont
+
+  subgraph sc["Servicio de Clientes  [Spring Boot]"]
+    api["<b>API REST</b><br/>GET /clientes/{id}<br/>Perfil, productos, cuentas"]:::comp
+    agg["<b>Agregador de datos del cliente</b><br/>Combina datos básicos del Core y<br/>datos extendidos en un solo modelo"]:::comp
+    cache["<b>Repositorio con caché</b><br/>[Decorator sobre el repositorio real]<br/>Cache-aside, TTL por tipo de dato"]:::comp
+    guard["<b>Protección ante avalancha</b><br/>Lock por clave (single-flight),<br/>TTL con jitter, negative caching"]:::comp
+    sec["<b>Serializador y cifrado</b><br/>Cifrado de campos sensibles,<br/>claves con ID seudonimizado"]:::comp
+    repo["<b>Repositorio remoto</b><br/>[Repository + Adapter]<br/>Cliente de la capa de integración"]:::comp
+    cbr["<b>Resiliencia</b><br/>Circuit breaker, timeout,<br/>respuesta degradada desde caché"]:::comp
+    cons["<b>Consumidor de eventos</b><br/>cliente.actualizado,<br/>movimiento.registrado"]:::comp
+    inv["<b>Invalidador</b><br/>Elimina o refresca las claves<br/>afectadas"]:::comp
+  end
+
+  subgraph pw["Precarga de Caché  [Worker]"]
+    cons2["<b>Consumidor de eventos de acceso</b><br/>auth.login.exitoso"]:::comp
+    freq["<b>Detector de clientes frecuentes</b><br/>Contador por ventana deslizante<br/>[Redis sorted set]"]:::comp
+    pol["<b>Política de frecuencia</b><br/>Frecuente: Top-N o 5 o más<br/>accesos en 7 días"]:::comp
+    warm["<b>Precargador</b><br/>Al login y antes de picos<br/>(quincena, fin de mes)"]:::comp
+    cons2 --> freq --> pol --> warm
+  end
+
+  bff --> api --> agg --> cache
+  cache --> guard --> sec
+  sec <--> redis
+  guard -- "Fallo de caché" --> repo
+  repo --> cbr --> integ
+  kafka --> cons --> inv --> redis
+  kafka -. "auth.login.exitoso" .-> cons2
+  freq <--> redis
+  warm -- "Solicita carga" --> api
